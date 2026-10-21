@@ -3,14 +3,15 @@ import pygame
 import sys
 import math
 import copy
+from pathlib import Path
 
 # Configuración de constantes
-ANCHO_VENTANA = 880
-ALTO_VENTANA = 600
+ANCHO_VENTANA = 1100
+ALTO_VENTANA = 760
 TAMAÑO_TABLERO = 6
-TAM_CELDA = 80
-MARGEN_X = 50
-MARGEN_Y = 60
+TAM_CELDA = 82
+MARGEN_X = 67
+MARGEN_Y = 198
 
 # Colores
 COLOR_FONDO = (30, 30, 46)
@@ -304,18 +305,84 @@ def minimax(profundidad, tablero, maximizador, profundidadMaxima, alpha, beta):
 # =====================================================================
 
 class JuegoIsolaPygame:
+    """Interfaz volcánica con sprites. Las reglas y Minimax se mantienen."""
+
+    OSCURO = (18, 12, 17)
+    PANEL = (32, 20, 22)
+    TEXTO = (255, 234, 211)
+    MUTED = (190, 165, 151)
+    AZUL = (51, 167, 255)
+    NARANJA = (255, 121, 28)
+    FUEGO = (255, 183, 63)
+
     def __init__(self):
         pygame.init()
         self.pantalla = pygame.display.set_mode((ANCHO_VENTANA, ALTO_VENTANA))
-        pygame.display.set_caption("El Suelo es Lava (Isola) - Minimax con Poda Alfa-Beta")
+        pygame.display.set_caption("EL SUELO ES LAVA | Minimax con poda alfa-beta")
         self.reloj = pygame.time.Clock()
-
-        self.fuente_titulo = pygame.font.SysFont("Segoe UI", 24, bold=True)
-        self.fuente_normal = pygame.font.SysFont("Segoe UI", 16)
-        self.fuente_negrita = pygame.font.SysFont("Segoe UI", 16, bold=True)
-
+        self.fuente_titulo = pygame.font.SysFont("dejavusans", 22, bold=True)
+        self.fuente_texto = pygame.font.SysFont("dejavusans", 15)
+        self.fuente_fuerte = pygame.font.SysFont("dejavusans", 15, bold=True)
+        self.fuente_chica = pygame.font.SysFont("dejavusans", 12)
+        self.fuente_numero = pygame.font.SysFont("dejavusans", 25, bold=True)
         self.profundidad_maxima = 3
+        self.btn_reiniciar = pygame.Rect(638, 633, 202, 62)
+        self.btn_dificultad = pygame.Rect(855, 633, 202, 62)
+        self.imagenes = {}
+        self.cargar_sprites()
         self.reiniciar_juego()
+
+    def cargar_sprites(self):
+        ruta = Path(__file__).resolve().parent / "assets"
+        tamanos = {
+            "tile_empty": (78, 78), "tile_human_blocked": (78, 78),
+            "tile_ai_blocked": (78, 78), "tile_lava": (78, 78),
+            "highlight_human": (78, 78), "highlight_ai": (78, 78),
+            "player_blue": (63, 83), "player_orange": (63, 83),
+            "button_idle": (202, 62), "button_hover": (202, 62),
+            "button_pressed": (202, 62), "button_disabled": (202, 62),
+            "logo": (377, 154), "scene": (1100, 760), "torch": (80, 145),
+        }
+        for nombre, tam in tamanos.items():
+            archivo = ruta / (nombre + ".png")
+            try:
+                imagen = pygame.image.load(str(archivo)).convert_alpha()
+                self.imagenes[nombre] = pygame.transform.smoothscale(imagen, tam)
+            except (FileNotFoundError, pygame.error):
+                self.imagenes[nombre] = None
+
+    def imagen(self, nombre, rect):
+        recurso = self.imagenes.get(nombre)
+        if recurso is None:
+            return False
+        if isinstance(rect, pygame.Rect):
+            pos = rect.topleft
+        else:
+            pos = rect
+        self.pantalla.blit(recurso, pos)
+        return True
+
+    def texto(self, mensaje, x, y, fuente=None, color=None):
+        imagen = (fuente or self.fuente_texto).render(str(mensaje), True, color or self.TEXTO)
+        self.pantalla.blit(imagen, (x, y))
+
+    def texto_centrado(self, mensaje, rect, fuente=None, color=None):
+        img = (fuente or self.fuente_fuerte).render(str(mensaje), True, color or self.TEXTO)
+        self.pantalla.blit(img, img.get_rect(center=rect.center))
+
+    def caja(self, rect, radio=15, alpha=228):
+        capa = pygame.Surface(rect.size, pygame.SRCALPHA)
+        pygame.draw.rect(capa, (*self.PANEL, alpha), capa.get_rect(), border_radius=radio)
+        pygame.draw.rect(capa, (147, 73, 36, 200), capa.get_rect(), 2, border_radius=radio)
+        self.pantalla.blit(capa, rect.topleft)
+
+    def boton(self, rect, texto):
+        hover = rect.collidepoint(pygame.mouse.get_pos())
+        sprite = "button_hover" if hover else "button_idle"
+        if not self.imagen(sprite, rect):
+            pygame.draw.rect(self.pantalla, (137, 60, 26) if hover else (81, 42, 29), rect, border_radius=13)
+            pygame.draw.rect(self.pantalla, self.FUEGO, rect, width=2, border_radius=13)
+        self.texto_centrado(texto, rect, self.fuente_fuerte)
 
     def reiniciar_juego(self):
         global nodos_explorados, podas_alfa_beta
@@ -323,15 +390,19 @@ class JuegoIsolaPygame:
         self.fase = "HUMANO_MOVER"
         self.ganador = None
         self.ultimo_score_ia = 0
+        # Este diccionario es solo visual: las reglas siguen usando DESTRUIDA = -1.
+        self.bloqueadas_por = {}
+        self.ultima_bloqueada = None
+        self.turnos_ia = 0
+        self.turnos_humano = 0
         nodos_explorados = 0
         podas_alfa_beta = 0
 
     def obtener_celda_raton(self, pos_raton):
         x, y = pos_raton
-        if MARGEN_X <= x < MARGEN_X + TAMAÑO_TABLERO * TAM_CELDA and MARGEN_Y <= y < MARGEN_Y + TAMAÑO_TABLERO * TAM_CELDA:
-            col = (x - MARGEN_X) // TAM_CELDA
-            fila = (y - MARGEN_Y) // TAM_CELDA
-            return (fila, col)
+        if (MARGEN_X <= x < MARGEN_X + TAMAÑO_TABLERO * TAM_CELDA and
+                MARGEN_Y <= y < MARGEN_Y + TAMAÑO_TABLERO * TAM_CELDA):
+            return ((y - MARGEN_Y) // TAM_CELDA, (x - MARGEN_X) // TAM_CELDA)
         return None
 
     def comprobar_fin_partida(self):
@@ -341,111 +412,121 @@ class JuegoIsolaPygame:
             return True
         if len(obtener_movimientos_ficha(self.tablero, IA)) == 0:
             self.fase = "FIN"
-            self.ganador = "HUMANO (Player 1)"
+            self.ganador = "HUMANO"
             return True
         return False
 
-    def dibujar(self):
-        self.pantalla.fill(COLOR_FONDO)
+    def dibujar_fondo(self):
+        self.pantalla.fill(self.OSCURO)
+        if self.imagenes.get("scene"):
+            self.imagen("scene", (0, 0))
+            capa = pygame.Surface(self.pantalla.get_size(), pygame.SRCALPHA)
+            capa.fill((12, 8, 15, 186))
+            self.pantalla.blit(capa, (0, 0))
+        pygame.draw.line(self.pantalla, (239, 83, 21), (42, 174), (1060, 174), 2)
+        self.imagen("logo", (40, 9))
+        self.texto("JUEGO DE ESTRATEGIA  /  MINIMAX + ALFA-BETA", 602, 94, self.fuente_fuerte, self.FUEGO)
+        self.texto("Muévete, destruye una plataforma y deja atrapado al rival.", 604, 126, self.fuente_chica)
 
-        titulo = self.fuente_titulo.render("🔥🔥🔥🔥 EL SUELO ES LAVA - MINIMAX CON PODA α-β", True, COLOR_TEXTO)
-        self.pantalla.blit(titulo, (MARGEN_X, 15))
-
-        movs_validos_humano = obtener_movimientos_ficha(self.tablero, HUMANO) if self.fase == "HUMANO_MOVER" else []
-
+    def dibujar_tablero(self):
+        self.caja(pygame.Rect(48, 181, 531, 523), alpha=244)
+        validas = set(obtener_movimientos_ficha(self.tablero, HUMANO)) if self.fase == "HUMANO_MOVER" else set()
+        hover = self.obtener_celda_raton(pygame.mouse.get_pos())
         for f in range(TAMAÑO_TABLERO):
             for c in range(TAMAÑO_TABLERO):
-                rect = pygame.Rect(MARGEN_X + c * TAM_CELDA, MARGEN_Y + f * TAM_CELDA, TAM_CELDA - 4, TAM_CELDA - 4)
+                pos = (f, c)
+                r = pygame.Rect(MARGEN_X + c * TAM_CELDA + 2, MARGEN_Y + f * TAM_CELDA + 2, 78, 78)
                 estado = self.tablero[f][c]
-
                 if estado == DESTRUIDA:
-                    pygame.draw.rect(self.pantalla, COLOR_LAVA, rect, border_radius=8)
-                    pygame.draw.line(self.pantalla, COLOR_FONDO, (rect.left + 20, rect.top + 20),
-                                     (rect.right - 20, rect.bottom - 20), 4)
-                    pygame.draw.line(self.pantalla, COLOR_FONDO, (rect.right - 20, rect.top + 20),
-                                     (rect.left + 20, rect.bottom - 20), 4)
+                    autor = self.bloqueadas_por.get(pos)
+                    clave = "tile_human_blocked" if autor == HUMANO else "tile_ai_blocked" if autor == IA else "tile_lava"
                 else:
-                    color_casilla = (75, 95, 90) if (f, c) in movs_validos_humano else COLOR_CELDA
-                    pygame.draw.rect(self.pantalla, color_casilla, rect, border_radius=8)
-                    pygame.draw.rect(self.pantalla, COLOR_CELDA_BORDE, rect, width=2, border_radius=8)
+                    clave = "tile_empty"
+                if not self.imagen(clave, r):
+                    color = (25, 76, 137) if estado == DESTRUIDA and self.bloqueadas_por.get(pos) == HUMANO else (149, 63, 29) if estado == DESTRUIDA else (70, 62, 63)
+                    pygame.draw.rect(self.pantalla, color, r, border_radius=12)
+                if pos == hover and ((pos in validas) or (self.fase == "HUMANO_DESTRUIR" and estado == VACIA)):
+                    res = pygame.Surface(r.size, pygame.SRCALPHA)
+                    pygame.draw.rect(res, (253, 195, 63, 75), res.get_rect(), 5, border_radius=12)
+                    self.pantalla.blit(res, r.topleft)
+                if pos in validas:
+                    pygame.draw.circle(self.pantalla, self.FUEGO, r.center, 6)
+                    pygame.draw.circle(self.pantalla, (255, 245, 200), r.center, 3)
+                if estado in (HUMANO, IA):
+                    recurso = "player_blue" if estado == HUMANO else "player_orange"
+                    if not self.imagen(recurso, (r.centerx - 31, r.y - 7)):
+                        pygame.draw.circle(self.pantalla, self.AZUL if estado == HUMANO else self.NARANJA, r.center, 27)
+                if estado == DESTRUIDA and pos == self.ultima_bloqueada:
+                    pygame.draw.circle(self.pantalla, (255, 250, 235), (r.right - 10, r.top + 11), 5)
+                    pygame.draw.circle(self.pantalla, self.OSCURO, (r.right - 10, r.top + 11), 2)
 
-                    if (f, c) in movs_validos_humano:
-                        pygame.draw.circle(self.pantalla, COLOR_AYUDA, rect.center, 8)
-
-                if estado == HUMANO:
-                    pygame.draw.circle(self.pantalla, COLOR_HUMANO, rect.center, 26)
-                    txt = self.fuente_negrita.render("TÚ", True, COLOR_FONDO)
-                    self.pantalla.blit(txt, txt.get_rect(center=rect.center))
-                elif estado == IA:
-                    pygame.draw.circle(self.pantalla, COLOR_IA, rect.center, 26)
-                    txt = self.fuente_negrita.render("IA", True, COLOR_FONDO)
-                    self.pantalla.blit(txt, txt.get_rect(center=rect.center))
-
-        panel_rect = pygame.Rect(560, MARGEN_Y, 280, TAMAÑO_TABLERO * TAM_CELDA - 4)
-        pygame.draw.rect(self.pantalla, COLOR_PANEL, panel_rect, border_radius=12)
-
-        y_txt = MARGEN_Y + 20
-        self.pantalla.blit(self.fuente_negrita.render("ESTADO DE LA PARTIDA", True, COLOR_AMARILLO), (580, y_txt))
-        y_txt += 30
-
+    def dibujar_panel(self):
+        self.caja(pygame.Rect(609, 181, 451, 523), alpha=238)
+        self.texto("ESTADO DE LA PARTIDA", 635, 199, self.fuente_fuerte, self.FUEGO)
         if self.fase == "HUMANO_MOVER":
-            msg, col_msg = "Tu turno (Paso 1): Mueve tu ficha", COLOR_AYUDA
+            titulo, ayuda, col = "TU TURNO · MOVER", "Haz clic en una plataforma cercana.", self.AZUL
         elif self.fase == "HUMANO_DESTRUIR":
-            msg, col_msg = "Tu turno (Paso 2): Quema 1 casilla", COLOR_LAVA
+            titulo, ayuda, col = "TU TURNO · BLOQUEAR", "Destruye cualquier casilla libre.", self.AZUL
         elif self.fase == "TURNO_IA":
-            msg, col_msg = "IA calculando árbol Minimax...", COLOR_IA
+            titulo, ayuda, col = "LA IA ESTÁ JUGANDO", "Evaluando sus posibles movimientos...", self.NARANJA
         else:
-            msg, col_msg = f"¡Gana {self.ganador}!", COLOR_AMARILLO
+            titulo, ayuda, col = "PARTIDA TERMINADA", "Ganador: " + str(self.ganador), self.FUEGO
+        pygame.draw.circle(self.pantalla, col, (646, 248), 6)
+        self.texto(titulo, 665, 237, self.fuente_titulo)
+        self.texto(ayuda, 638, 276, self.fuente_chica, self.MUTED)
+        pygame.draw.line(self.pantalla, (128, 77, 55), (632, 304), (1034, 304), 1)
 
-        self.pantalla.blit(self.fuente_negrita.render(msg, True, col_msg), (580, y_txt))
-        y_txt += 45
-
-        self.pantalla.blit(self.fuente_negrita.render("TELEMETRÍA MINIMAX α-β", True, COLOR_HUMANO), (580, y_txt))
-        y_txt += 28
+        self.texto("PLATAFORMAS DESTRUIDAS", 635, 320, self.fuente_fuerte, self.FUEGO)
+        self.imagen("tile_human_blocked", (640, 353))
+        self.imagen("tile_ai_blocked", (839, 353))
+        # Los indicadores del panel tienen tamaño fijo aunque el sprite nativo sea grande.
+        self.texto("TÚ", 719, 368, self.fuente_fuerte, self.AZUL)
+        self.texto("IA", 919, 368, self.fuente_fuerte, self.NARANJA)
+        humano = sum(v == HUMANO for v in self.bloqueadas_por.values())
+        ia = sum(v == IA for v in self.bloqueadas_por.values())
+        self.texto(str(humano) + " bloqueadas", 719, 389, self.fuente_chica)
+        self.texto(str(ia) + " bloqueadas", 919, 389, self.fuente_chica)
+        pygame.draw.line(self.pantalla, (128, 77, 55), (632, 453), (1034, 453), 1)
+        self.texto("TELEMETRÍA DE MINIMAX", 635, 471, self.fuente_fuerte, self.FUEGO)
         estadisticas = [
-            f"Profundidad Máxima: {self.profundidad_maxima}",
-            f"Valor Heurístico h(x): {self.ultimo_score_ia}",
-            f"Nodos explorados: {nodos_explorados}",
-            f"Ramas podadas (α-β): {podas_alfa_beta}",
-            f"Salidas IA: {len(obtener_movimientos_ficha(self.tablero, IA))} | Tuyas: {len(obtener_movimientos_ficha(self.tablero, HUMANO))}"
+            ("Profundidad", str(self.profundidad_maxima)),
+            ("Valor heurístico h(x)", f"{self.ultimo_score_ia:.1f}"),
+            ("Nodos explorados", str(nodos_explorados)),
+            ("Podas alfa-beta", str(podas_alfa_beta)),
+            ("Movimientos (tú / IA)", f"{len(obtener_movimientos_ficha(self.tablero, HUMANO))} / {len(obtener_movimientos_ficha(self.tablero, IA))}"),
         ]
-        for linea in estadisticas:
-            self.pantalla.blit(self.fuente_normal.render(linea, True, COLOR_TEXTO), (580, y_txt))
-            y_txt += 24
+        for i, (etiqueta, dato) in enumerate(estadisticas):
+            y = 500 + i * 24
+            self.texto(etiqueta, 638, y, self.fuente_chica, self.MUTED)
+            numero = self.fuente_fuerte.render(dato, True, self.TEXTO)
+            self.pantalla.blit(numero, (1034 - numero.get_width(), y - 2))
+        self.boton(self.btn_reiniciar, "NUEVA PARTIDA")
+        self.boton(self.btn_dificultad, f"PROFUNDIDAD {self.profundidad_maxima}")
 
-        y_txt += 20
-        self.btn_reiniciar = pygame.Rect(580, y_txt, 240, 40)
-        pygame.draw.rect(self.pantalla, COLOR_HUMANO, self.btn_reiniciar, border_radius=8)
-        txt_reiniciar = self.fuente_negrita.render("🔄 Nueva Partida", True, COLOR_FONDO)
-        self.pantalla.blit(txt_reiniciar, txt_reiniciar.get_rect(center=self.btn_reiniciar.center))
-
-        y_txt += 55
-        self.btn_dificultad = pygame.Rect(580, y_txt, 240, 40)
-        pygame.draw.rect(self.pantalla, COLOR_CELDA, self.btn_dificultad, border_radius=8)
-        txt_dif = self.fuente_negrita.render(f"⚙️ Cambiar Profundidad ({self.profundidad_maxima})", True, COLOR_TEXTO)
-        self.pantalla.blit(txt_dif, txt_dif.get_rect(center=self.btn_dificultad.center))
-
+    def dibujar(self):
+        self.dibujar_fondo()
+        self.dibujar_tablero()
+        self.dibujar_panel()
+        self.texto("AZUL: tus bloqueos", 68, 721, self.fuente_chica, self.AZUL)
+        self.texto("NARANJA: bloqueos IA", 272, 721, self.fuente_chica, self.NARANJA)
+        self.texto("El punto blanco señala el último bloqueo.", 633, 721, self.fuente_chica, self.MUTED)
         pygame.display.flip()
 
     def ejecutar(self):
         global nodos_explorados, podas_alfa_beta
-
         while True:
             for evento in pygame.event.get():
                 if evento.type == pygame.QUIT:
                     pygame.quit()
                     sys.exit()
-
                 if evento.type == pygame.MOUSEBUTTONDOWN and evento.button == 1:
                     pos = evento.pos
-
                     if self.btn_reiniciar.collidepoint(pos):
                         self.reiniciar_juego()
                         continue
                     if self.btn_dificultad.collidepoint(pos) and self.fase != "TURNO_IA":
                         self.profundidad_maxima = 2 if self.profundidad_maxima == 4 else self.profundidad_maxima + 1
                         continue
-
                     celda = self.obtener_celda_raton(pos)
                     if celda:
                         f, c = celda
@@ -455,31 +536,31 @@ class JuegoIsolaPygame:
                                 self.tablero[pos_ant[0]][pos_ant[1]] = VACIA
                                 self.tablero[f][c] = HUMANO
                                 self.fase = "HUMANO_DESTRUIR"
-
                         elif self.fase == "HUMANO_DESTRUIR":
                             if self.tablero[f][c] == VACIA:
                                 self.tablero[f][c] = DESTRUIDA
+                                self.bloqueadas_por[(f, c)] = HUMANO
+                                self.ultima_bloqueada = (f, c)
+                                self.turnos_humano += 1
                                 if not self.comprobar_fin_partida():
                                     self.fase = "TURNO_IA"
-
             self.dibujar()
-
             if self.fase == "TURNO_IA":
                 pygame.time.delay(250)
                 nodos_explorados = 0
                 podas_alfa_beta = 0
-
                 mejor_jugada, valor_minimax = minimax(
                     0, self.tablero, True, self.profundidad_maxima, -math.inf, math.inf
                 )
-
                 if mejor_jugada:
                     aplicar(mejor_jugada, self.tablero, True)
+                    destruir = mejor_jugada[1]
+                    self.bloqueadas_por[destruir] = IA
+                    self.ultima_bloqueada = destruir
+                    self.turnos_ia += 1
                     self.ultimo_score_ia = valor_minimax
-
                 if not self.comprobar_fin_partida():
                     self.fase = "HUMANO_MOVER"
-
             self.reloj.tick(30)
 
 

@@ -1,4 +1,4 @@
-# 🔥 El Suelo es Lava (*Isola*) — IA con Minimax y Poda Alfa-Beta
+# El Suelo es Lava — IA con Minimax y Poda Alfa-Beta
 
 ![Python](https://img.shields.io/badge/Python-3.11-blue?style=for-the-badge&logo=python&logoColor=white)
 ![Pygame](https://img.shields.io/badge/Pygame-2.6.1-green?style=for-the-badge&logo=python&logoColor=white)
